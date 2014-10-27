@@ -12,6 +12,8 @@
 //	this software. If not, see <http://creativecommons.org/publicdomain/zero/1.0/>.
 package metrics_influxdb;
 
+import java.net.InetAddress;
+import java.net.UnknownHostException;
 import java.util.Map;
 import java.util.SortedMap;
 import java.util.concurrent.TimeUnit;
@@ -38,27 +40,27 @@ import com.codahale.metrics.Timer;
  *      time series database with no external dependencies.</a>
  */
 public class InfluxdbReporter extends ScheduledReporter {
-  private static String[] COLUMNS_TIMER = {
-      "time", "count"
-      , "min", "max", "mean", "std-dev"
-      , "50-percentile", "75-percentile", "95-percentile", "99-percentile", "999-percentile"
-      , "one-minute", "five-minute", "fifteen-minute", "mean-rate"
-  };
-  private static String[] COLUMNS_HISTOGRAM = {
-      "time", "count"
-      , "min", "max", "mean", "std-dev"
-      , "50-percentile", "75-percentile", "95-percentile", "99-percentile", "999-percentile"
-  };
-  private static String[] COLUMNS_COUNT = {
-      "time", "count"
-  };
-  private static String[] COLUMNS_GAUGE = {
-      "time", "value"
-  };
-  private static String[] COLUMNS_METER = {
-      "time", "count"
-      , "one-minute", "five-minute", "fifteen-minute", "mean-rate"
-  };
+	  private static String[] COLUMNS_TIMER = {
+	      "time", "host", "environment", "component", "count"
+	      , "min", "max", "mean", "std-dev"
+	      , "50-percentile", "75-percentile", "95-percentile", "99-percentile", "999-percentile"
+	      , "one-minute", "five-minute", "fifteen-minute", "mean-rate"
+	  };
+	  private static String[] COLUMNS_HISTOGRAM = {
+	      "time", "host", "environment", "component", "count"
+	      , "min", "max", "mean", "std-dev"
+	      , "50-percentile", "75-percentile", "95-percentile", "99-percentile", "999-percentile"
+	  };
+	  private static String[] COLUMNS_COUNT = {
+	      "time", "host", "environment", "component", "count"
+	  };
+	  private static String[] COLUMNS_GAUGE = {
+	      "time", "host", "environment", "component", "value"
+	  };
+	  private static String[] COLUMNS_METER = {
+	      "time", "host", "environment", "component", "count"
+	      , "one-minute", "five-minute", "fifteen-minute", "mean-rate"
+	  };
 
   /**
    * Returns a new {@link Builder} for {@link InfluxdbReporter}.
@@ -80,6 +82,8 @@ public class InfluxdbReporter extends ScheduledReporter {
     private final MetricRegistry registry;
     private Clock clock;
     private String prefix;
+    private String environment;
+    private String component;
     private TimeUnit rateUnit;
     private TimeUnit durationUnit;
     private MetricFilter filter;
@@ -88,6 +92,8 @@ public class InfluxdbReporter extends ScheduledReporter {
       this.registry = registry;
       this.clock = Clock.defaultClock();
       this.prefix = null;
+      this.environment = null;
+      this.component = null;
       this.rateUnit = TimeUnit.SECONDS;
       this.durationUnit = TimeUnit.MILLISECONDS;
       this.filter = MetricFilter.ALL;
@@ -114,6 +120,30 @@ public class InfluxdbReporter extends ScheduledReporter {
      */
     public Builder prefixedWith(String prefix) {
       this.prefix = prefix;
+      return this;
+    }
+
+    /**
+     * Use given string to identify the metric environment (production, test, development, etc).
+     *
+     * @param environment
+     *          the environment for these metrics
+     * @return {@code this}
+     */
+    public Builder withEnvironment(String environment) {
+      this.environment = environment;
+      return this;
+    }
+
+    /**
+     * Use given string to identify the metric component (web, tomcat, database, engine, agent, etc).
+     *
+     * @param component
+     *          the component for these metrics
+     * @return {@code this}
+     */
+    public Builder withComponent(String component) {
+      this.component = component;
       return this;
     }
 
@@ -166,6 +196,8 @@ public class InfluxdbReporter extends ScheduledReporter {
           influxdb,
           clock,
           prefix,
+          environment,
+          component,
           rateUnit,
           durationUnit,
           filter);
@@ -177,11 +209,15 @@ public class InfluxdbReporter extends ScheduledReporter {
   private final Influxdb influxdb;
   private final Clock clock;
   private final String prefix;
+  private final String host;
+  private final String environment;
+  private final String component;
 
   // Optimization : use pointsXxx to reduce object creation, by reuse as arg of
   // Influxdb.appendSeries(...)
   private final Object[][] pointsTimer = { {
       0l,
+      "","","",
       0,
       0.0d,
       0.0d,
@@ -199,6 +235,7 @@ public class InfluxdbReporter extends ScheduledReporter {
   } };
   private final Object[][] pointsHistogram = { {
       0l,
+      "","","",
       0,
       0.0d,
       0.0d,
@@ -212,14 +249,17 @@ public class InfluxdbReporter extends ScheduledReporter {
   } };
   private final Object[][] pointsCounter = { {
       0l,
+      "","","",
       0l
   } };
   private final Object[][] pointsGauge = { {
       0l,
+      "","","",
       null
   } };
   private final Object[][] pointsMeter = { {
       0l,
+      "","","",
       0,
       0.0d,
       0.0d,
@@ -231,6 +271,8 @@ public class InfluxdbReporter extends ScheduledReporter {
       Influxdb influxdb,
       Clock clock,
       String prefix,
+      String env,
+      String comp,
       TimeUnit rateUnit,
       TimeUnit durationUnit,
       MetricFilter filter) {
@@ -238,6 +280,21 @@ public class InfluxdbReporter extends ScheduledReporter {
     this.influxdb = influxdb;
     this.clock = clock;
     this.prefix = (prefix == null) ? "" : (prefix.trim() + ".");
+    this.environment = (env == null) ? "" : env;
+    this.component = (comp == null) ? "" : comp;
+    String hostname = "unknown.host";
+    try
+	{
+		hostname = InetAddress.getLocalHost().getHostName();
+	}
+	catch (UnknownHostException e)
+	{		
+		e.printStackTrace();
+	}
+    finally 
+    {
+    	this.host = hostname;
+    }
   }
 
   @Override
@@ -283,20 +340,23 @@ public class InfluxdbReporter extends ScheduledReporter {
     final Snapshot snapshot = timer.getSnapshot();
     Object[] p = pointsTimer[0];
     p[0] = timestamp;
-    p[1] = snapshot.size();
-    p[2] = convertDuration(snapshot.getMin());
-    p[3] = convertDuration(snapshot.getMax());
-    p[4] = convertDuration(snapshot.getMean());
-    p[5] = convertDuration(snapshot.getStdDev());
-    p[6] = convertDuration(snapshot.getMedian());
-    p[7] = convertDuration(snapshot.get75thPercentile());
-    p[8] = convertDuration(snapshot.get95thPercentile());
-    p[9] = convertDuration(snapshot.get99thPercentile());
-    p[10] = convertDuration(snapshot.get999thPercentile());
-    p[11] = convertRate(timer.getOneMinuteRate());
-    p[12] = convertRate(timer.getFiveMinuteRate());
-    p[13] = convertRate(timer.getFifteenMinuteRate());
-    p[14] = convertRate(timer.getMeanRate());
+    p[1] = host;
+    p[2] = environment;
+    p[3] = component;
+    p[4] = snapshot.size();
+    p[5] = convertDuration(snapshot.getMin());
+    p[6] = convertDuration(snapshot.getMax());
+    p[7] = convertDuration(snapshot.getMean());
+    p[8] = convertDuration(snapshot.getStdDev());
+    p[9] = convertDuration(snapshot.getMedian());
+    p[10] = convertDuration(snapshot.get75thPercentile());
+    p[11] = convertDuration(snapshot.get95thPercentile());
+    p[12] = convertDuration(snapshot.get99thPercentile());
+    p[13] = convertDuration(snapshot.get999thPercentile());
+    p[14] = convertRate(timer.getOneMinuteRate());
+    p[15] = convertRate(timer.getFiveMinuteRate());
+    p[16] = convertRate(timer.getFifteenMinuteRate());
+    p[17] = convertRate(timer.getMeanRate());
     assert (p.length == COLUMNS_TIMER.length);
     influxdb.appendSeries(prefix, name, ".timer", COLUMNS_TIMER, pointsTimer);
   }
@@ -305,16 +365,19 @@ public class InfluxdbReporter extends ScheduledReporter {
     final Snapshot snapshot = histogram.getSnapshot();
     Object[] p = pointsHistogram[0];
     p[0] = timestamp;
-    p[1] = snapshot.size();
-    p[2] = snapshot.getMin();
-    p[3] = snapshot.getMax();
-    p[4] = snapshot.getMean();
-    p[5] = snapshot.getStdDev();
-    p[6] = snapshot.getMedian();
-    p[7] = snapshot.get75thPercentile();
-    p[8] = snapshot.get95thPercentile();
-    p[9] = snapshot.get99thPercentile();
-    p[10] = snapshot.get999thPercentile();
+    p[1] = host;
+    p[2] = environment;
+    p[3] = component;
+    p[4] = snapshot.size();
+    p[5] = snapshot.getMin();
+    p[6] = snapshot.getMax();
+    p[7] = snapshot.getMean();
+    p[8] = snapshot.getStdDev();
+    p[9] = snapshot.getMedian();
+    p[10] = snapshot.get75thPercentile();
+    p[11] = snapshot.get95thPercentile();
+    p[12] = snapshot.get99thPercentile();
+    p[13] = snapshot.get999thPercentile();
     assert (p.length == COLUMNS_HISTOGRAM.length);
     influxdb.appendSeries(prefix, name, ".histogram", COLUMNS_HISTOGRAM, pointsHistogram);
   }
@@ -322,7 +385,10 @@ public class InfluxdbReporter extends ScheduledReporter {
   private void reportCounter(String name, Counter counter, long timestamp) {
     Object[] p = pointsCounter[0];
     p[0] = timestamp;
-    p[1] = counter.getCount();
+    p[1] = host;
+    p[2] = environment;
+    p[3] = component;
+    p[4] = counter.getCount();
     assert (p.length == COLUMNS_COUNT.length);
     influxdb.appendSeries(prefix, name, ".count", COLUMNS_COUNT, pointsCounter);
   }
@@ -330,7 +396,10 @@ public class InfluxdbReporter extends ScheduledReporter {
   private void reportGauge(String name, Gauge<?> gauge, long timestamp) {
     Object[] p = pointsGauge[0];
     p[0] = timestamp;
-    p[1] = gauge.getValue();
+    p[1] = host;
+    p[2] = environment;
+    p[3] = component;
+    p[4] = gauge.getValue();
     assert (p.length == COLUMNS_GAUGE.length);
     influxdb.appendSeries(prefix, name, ".value", COLUMNS_GAUGE, pointsGauge);
   }
@@ -338,39 +407,16 @@ public class InfluxdbReporter extends ScheduledReporter {
   private void reportMeter(String name, Metered meter, long timestamp) {
     Object[] p = pointsMeter[0];
     p[0] = timestamp;
-    p[1] = meter.getCount();
-    p[2] = convertRate(meter.getOneMinuteRate());
-    p[3] = convertRate(meter.getFiveMinuteRate());
-    p[4] = convertRate(meter.getFifteenMinuteRate());
-    p[5] = convertRate(meter.getMeanRate());
+    p[1] = host;
+    p[2] = environment;
+    p[3] = component;
+    p[4] = meter.getCount();
+    p[5] = convertRate(meter.getOneMinuteRate());
+    p[6] = convertRate(meter.getFiveMinuteRate());
+    p[7] = convertRate(meter.getFifteenMinuteRate());
+    p[8] = convertRate(meter.getMeanRate());
     assert (p.length == COLUMNS_METER.length);
     influxdb.appendSeries(prefix, name, ".meter", COLUMNS_METER, pointsMeter);
   }
 
-  // private String format(Object o) {
-  // if (o instanceof Float) {
-  // return format(((Float) o).doubleValue());
-  // } else if (o instanceof Double) {
-  // return format(((Double) o).doubleValue());
-  // } else if (o instanceof Byte) {
-  // return format(((Byte) o).longValue());
-  // } else if (o instanceof Short) {
-  // return format(((Short) o).longValue());
-  // } else if (o instanceof Integer) {
-  // return format(((Integer) o).longValue());
-  // } else if (o instanceof Long) {
-  // return format(((Long) o).longValue());
-  // }
-  // return null;
-  // }
-  // private String format(long n) {
-  // return Long.toString(n);
-  // }
-  //
-  // private String format(double v) {
-  // // the Carbon plaintext format is pretty underspecified, but it seems like
-  // it just wants
-  // // US-formatted digits
-  // return String.format(Locale.US, "%2.2f", v);
-  // }
 }

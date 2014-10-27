@@ -19,6 +19,8 @@ The library provide a lighter client than influxdb-java to push only metrics.
 		final InfluxdbReporter reporter = InfluxdbReporter
 				.forRegistry(registry)
 				.prefixedWith("test")
+				.withEnvironment("development")
+				.withComponent("web")
 				.convertRatesTo(TimeUnit.SECONDS)
 				.convertDurationsTo(TimeUnit.MILLISECONDS)
 				.filter(MetricFilter.ALL)
